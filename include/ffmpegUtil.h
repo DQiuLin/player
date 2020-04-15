@@ -202,12 +202,12 @@ class FrameGrabber
             if (currentPacketStreamIndex == videoIndex && videoEnabled)
             {
                 ret = avcodec_receive_frame(vCodecCtx, frame);
-                cout << "Video avcodec receive frame" << endl;
+                // cout << "Video avcodec receive frame" << endl;
             }
             else if (currentPacketStreamIndex == audioIndex && audioEnabled)
             {
                 ret = avcodec_receive_frame(aCodecCtx, frame);
-                cout << "Audio avcodec receive frame" << endl;
+                // cout << "Audio avcodec receive frame" << endl;
             }
             else
             {
@@ -325,7 +325,7 @@ public:
             else
             {
                 ffutils::initCodec(formatCtx, videoIndex, &vCodecCtx);
-                cout << "Init video codec success";
+                cout << "Init video codec success" << endl;
             }
         }
 
@@ -341,13 +341,14 @@ public:
             else
             {
                 ffutils::initCodec(formatCtx, audioIndex, &aCodecCtx);
+                cout << "Init audio codec success" << endl;
             }
         }
 
         cout << "-----------------File Information---------------" << endl;
         av_dump_format(formatCtx, videoIndex, inputUrl.c_str(), 0);
         // Print detailed information about the input or output format
-        cout << "-------------------------------------------------\n"
+        cout << "------------------------------------------------" << endl
              << endl;
         packet = (AVPacket *)av_malloc(sizeof(AVPacket));
     }
@@ -421,6 +422,203 @@ public:
         int ret = grabFrameByType(pFrame, AVMediaType::AVMEDIA_TYPE_VIDEO);
         return ret;
     }
+
+    int grabAudioFrame(AVFrame *pFrame)
+    {
+        if (!audioEnabled)
+        {
+            throw std::runtime_error("audio disabled");
+        }
+        int ret = grabFrameByType(pFrame, AVMediaType::AVMEDIA_TYPE_AUDIO);
+        return ret;
+    }
+
+    int getSampleRate() const
+    {
+        if (aCodecCtx != nullptr)
+        {
+            return aCodecCtx->sample_rate;
+        }
+        else
+        {
+            throw std::runtime_error("can not get audio sampleRate");
+        }
+    }
+
+    int getChannels() const
+    {
+        if (aCodecCtx != nullptr)
+        {
+            return aCodecCtx->channels;
+        }
+        else
+        {
+            throw std::runtime_error("can not get audio channels");
+        }
+    }
+
+    int getChannelLayout() const
+    {
+        if (aCodecCtx != nullptr)
+        {
+            return aCodecCtx->channel_layout;
+        }
+        else
+        {
+            throw std::runtime_error("can not get audio channelLayout");
+        }
+    }
+
+    int getSampleFormat() const
+    {
+        if (aCodecCtx != nullptr)
+        {
+            return (int)aCodecCtx->sample_fmt;
+        }
+        else
+        {
+            throw std::runtime_error("can not get audio sampleFormat");
+        }
+    }
+};
+
+struct AudioInfo
+{
+    int64_t layout;        //音频通道布局
+    int sampleRate;        //采样率
+    int channles;          //通道数
+    AVSampleFormat format; //样本精度
+
+    AudioInfo()
+    {
+        layout = -1;
+        sampleRate = -1;
+        channles = -1;
+        format = AV_SAMPLE_FMT_S16;
+    }
+
+    AudioInfo(int64_t l, int sRate, int ch, AVSampleFormat fmt)
+        : layout(l), sampleRate(sRate), channles(ch), format(fmt) {}
+};
+
+//重采样，改变音频的采样率等参数，使得音频按照我们期望的参数输出
+class ReSampler
+{
+    SwrContext *swr; // 重采样结构体，改变音频的采样率等参数
+
+public:
+    ReSampler(const ReSampler &) = delete;
+    ReSampler(ReSampler &&) noexcept = delete;
+    ReSampler operator=(const ReSampler &) = delete;
+
+public:
+    ~ReSampler()
+    {
+        cout << "~ReSampler called" << endl;
+        if (swr != nullptr)
+        {
+            swr_free(&swr);
+        }
+    }
+
+    const AudioInfo in;
+    const AudioInfo out;
+
+public:
+    static AudioInfo getDefaultAudioInfo(int sr)
+    {
+        int64_t layout = AV_CH_LAYOUT_STEREO;
+        int sampleRate = sr;
+        int channels = 2;
+        AVSampleFormat format = AV_SAMPLE_FMT_S16;
+
+        return ffmpegUtil::AudioInfo(layout, sampleRate, channels, format);
+    }
+
+public:
+    ReSampler(AudioInfo input, AudioInfo output) : in(input), out(output)
+    {
+        //分配SwrContext
+        swr = swr_alloc_set_opts(nullptr, out.layout, out.format, out.sampleRate,
+                                 in.layout, in.format, in.sampleRate, 0, nullptr);
+        //设置完成后需要初始化
+        if (swr_init(swr))
+        {
+            throw std::runtime_error("swr_init error");
+        }
+    }
+
+public:
+    int allocDataBuf(uint8_t **outData, int inputSample)
+    { //申请数据存储空间
+        int bytePerOutSample = -1;
+        switch (out.format)
+        {
+        case AV_SAMPLE_FMT_U8:
+            bytePerOutSample = 1;
+            break;
+        case AV_SAMPLE_FMT_S16P:
+        case AV_SAMPLE_FMT_S16:
+            bytePerOutSample = 2;
+            break;
+        case AV_SAMPLE_FMT_S32:
+        case AV_SAMPLE_FMT_S32P:
+        case AV_SAMPLE_FMT_FLT:
+        case AV_SAMPLE_FMT_FLTP:
+            bytePerOutSample = 4;
+            break;
+        case AV_SAMPLE_FMT_DBL:
+        case AV_SAMPLE_FMT_DBLP:
+        case AV_SAMPLE_FMT_S64:
+        case AV_SAMPLE_FMT_S64P:
+            bytePerOutSample = 8;
+            break;
+        default:
+            bytePerOutSample = 2;
+            break;
+        }
+
+        int outSamplesPerChannel = av_rescale_rnd(inputSample, out.sampleRate, in.sampleRate, AV_ROUND_UP);
+
+        int outSize = outSamplesPerChannel * out.channles * bytePerOutSample;
+
+        std::cout << "GuessOutSamplesPerChannel: " << outSamplesPerChannel << std::endl;
+        std::cout << "GuessOutSize: " << outSize << std::endl;
+
+        // Allocate a memory block with alignment suitable for all memory accesses.
+        outSize *= 1.2;
+        *outData = (uint8_t *)av_malloc(sizeof(uint8_t) * outSize);
+
+        return outSize;
+    }
+
+public:
+    std::tuple<int, int> reSample(uint8_t *dataBuffer, int dataBufferSize, const AVFrame *aframe)
+    {
+
+        //Convert audio.
+        int outSample = swr_convert(swr, &dataBuffer, dataBufferSize, (const uint8_t **)&aframe->data[0], aframe->nb_samples);
+
+        if (outSample <= 0)
+        {
+            throw std::runtime_error("error: outSample=");
+        }
+
+        // Get the required buffer size for the given audio parameters.
+        int outDataSize = av_samples_get_buffer_size(NULL, out.channles, outSample, out.format, 1);
+
+        if (outDataSize <= 0)
+        {
+            throw std::runtime_error("error: outDataSize=");
+        }
+        return {outSample, outDataSize};
+    }
+};
+
+struct AudioUtil
+{
+    FrameGrabber *grabber;
+    ReSampler *reSampler;
 };
 
 } // namespace ffmpegUtil

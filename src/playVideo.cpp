@@ -17,7 +17,7 @@ using std::cout;
 using std::endl;
 using std::string;
 
-namespace
+namespace video
 {
 using namespace ffmpegUtil;
 
@@ -70,7 +70,7 @@ void playMediaVideo(const string &inputFile)
 
     //创建窗口SDL_Window
     SDL_Window *screen;
-    screen = SDL_CreateWindow("player", SDL_WINDOWPOS_UNDEFINED,
+    screen = SDL_CreateWindow(":-D Player", SDL_WINDOWPOS_UNDEFINED,
                               SDL_WINDOWPOS_UNDEFINED, w, h,
                               SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
 
@@ -201,11 +201,4 @@ void playVideo(const string &inputfile)
     }
 }
 
-} // namespace
-
-int main()
-{
-    string inputFile = "/Users/dql/Desktop/01.mp4";
-    playVideo(inputFile);
-    return 0;
-}
+} // namespace video

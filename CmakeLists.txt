@@ -104,6 +104,8 @@ message(SDL_LIBRARY=${SDL_LIBRARY})
 add_executable (${PROJECT_NAME} 
 	"include/ffmpegUtil.h"
 	"src/playVideo.cpp"
+	"src/playAudio.cpp"
+	"src/main.cpp"
 )
 
 
