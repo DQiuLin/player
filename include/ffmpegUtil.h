@@ -96,188 +96,29 @@ struct ffutils
     }
 };
 
-class FrameGrabber
+class PacketGrabber
 {
     const string inputUrl;
+    AVFormatContext *formatCtx = nullptr;
+    bool fileGotToEnd = false;
 
     int videoIndex = -1;
     int audioIndex = -1;
 
-    const bool videoEnabled;
-    const bool audioEnabled;
-
-    AVFormatContext *formatCtx = nullptr; //封装格式上下文
-    AVCodecContext *vCodecCtx = nullptr;  //视频 编码器上下文
-    AVCodecContext *aCodecCtx = nullptr;  //音频 编码器上下文
-    AVPacket *packet = (AVPacket *)av_malloc(sizeof(AVPacket));
-    //存储一帧压缩编码数据
-    bool isEnd = false;
-
-    int grabFrameByType(AVFrame *frame, AVMediaType streamType)
-    {
-        int ret = -1;
-        int targetStream;
-
-        switch (streamType)
-        {
-        case AVMEDIA_TYPE_VIDEO:
-            targetStream = videoIndex;
-            break;
-        case AVMEDIA_TYPE_AUDIO:
-            targetStream = audioIndex;
-            break;
-        default:
-            targetStream = -1;
-            break;
-        }
-
-        while (true)
-        {
-            int currentPacketStreamIndex = -1;
-            while (!isEnd)
-            {
-                //读入packet
-                if (av_read_frame(formatCtx, packet) >= 0)
-                {
-                    currentPacketStreamIndex = packet->stream_index;
-                    if (packet->stream_index == videoIndex && videoEnabled)
-                    {
-                        //处理视频
-                        // feed video packet to codec
-                        ret = avcodec_send_packet(vCodecCtx, packet);
-
-                        if (ret == 0)
-                        {
-                            av_packet_unref(packet);
-                            break;
-                        }
-                        else
-                        {
-                            string errorMsg = "[VIDEO] avcodec_send_packet error: ";
-                            errorMsg += ret;
-                            cout << errorMsg << endl;
-                            throw std::runtime_error(errorMsg);
-                        }
-                    }
-                    else if (packet->stream_index == audioIndex && audioEnabled)
-                    {
-                        //处理音频
-                        // feed audio packet to codec
-                        ret = avcodec_send_packet(aCodecCtx, packet);
-
-                        if (ret == 0)
-                        {
-                            av_packet_unref(packet);
-                            break;
-                        }
-                        else
-                        {
-                            string errorMsg = "[AUDIO] avcodec_send_packet error: ";
-                            errorMsg += ret;
-                            cout << errorMsg << endl;
-                            throw std::runtime_error(errorMsg);
-                        }
-                    }
-                    else
-                    {
-                        stringstream ss{};
-                        ss << "av_read_frame skip packet in streanIndex ="
-                           << currentPacketStreamIndex;
-                        av_packet_unref(packet);
-                    }
-                }
-                else
-                {
-                    isEnd = true;
-                    if (vCodecCtx != nullptr)
-                        avcodec_send_packet(vCodecCtx, nullptr);
-                    if (aCodecCtx != nullptr)
-                        avcodec_send_packet(aCodecCtx, nullptr);
-                    break;
-                }
-            }
-
-            ret = -1;
-
-            if (currentPacketStreamIndex == videoIndex && videoEnabled)
-            {
-                ret = avcodec_receive_frame(vCodecCtx, frame);
-                // cout << "Video avcodec receive frame" << endl;
-            }
-            else if (currentPacketStreamIndex == audioIndex && audioEnabled)
-            {
-                ret = avcodec_receive_frame(aCodecCtx, frame);
-                // cout << "Audio avcodec receive frame" << endl;
-            }
-            else
-            {
-                if (isEnd)
-                {
-                    cout << "no more frames." << endl;
-                    return 0;
-                }
-                else
-                {
-                    stringstream ss{};
-                    ss << "unknown situation: currentPacketStreamIndex:"
-                       << currentPacketStreamIndex;
-                    continue;
-                }
-            }
-
-            if (ret == 0)
-            {
-                if (targetStream = -1 || currentPacketStreamIndex == targetStream)
-                {
-                    stringstream ss{};
-                    ss << "avcodec_receive_frame ret == 0. got [" << targetStream << "] ";
-
-                    if (currentPacketStreamIndex == videoIndex)
-                    {
-                        return 1;
-                    }
-                    else if (currentPacketStreamIndex == audioIndex)
-                    {
-                        return 2;
-                    }
-                    else
-                    {
-                        string errorMsg = "Unknown situation, it should never happen. ";
-                        errorMsg += ret;
-                        cout << errorMsg << endl;
-                        throw std::runtime_error(errorMsg);
-                    }
-                }
-                else
-                {
-                    continue;
-                }
-            }
-            else if (ret == AVERROR(EAGAIN))
-            {
-                continue;
-            }
-            else
-            {
-                string errorMsg = "avcodec_receive_frame error: ";
-                errorMsg += ret;
-                cout << errorMsg << endl;
-                throw std::runtime_error(errorMsg);
-            }
-        }
-    }
-
 public:
-    FrameGrabber(const string &url, bool enableVideo = true,
-                 bool enableAudio = true)
-        : inputUrl(url), videoEnabled(enableVideo), audioEnabled(enableAudio)
+    ~PacketGrabber()
     {
-        formatCtx = avformat_alloc_context(); //创建对象
+        if (formatCtx != nullptr)
+        {
+            avformat_free_context(formatCtx);
+            formatCtx = nullptr;
+        }
+        cout << "~PacketGrabber called." << endl;
     }
-
-    void start()
+    PacketGrabber(const string &uri) : inputUrl(uri)
     {
-        //打开文件
+        formatCtx = avformat_alloc_context();
+
         if (avformat_open_input(&formatCtx, inputUrl.c_str(), NULL, NULL) != 0)
         {
             string errorMsg = "Can not open input file:";
@@ -286,7 +127,6 @@ public:
             throw std::runtime_error(errorMsg);
         }
 
-        //验证流信息
         if (avformat_find_stream_info(formatCtx, NULL) < 0)
         {
             string errorMsg = "Can not find stream information in input file:";
@@ -297,208 +137,71 @@ public:
 
         for (int i = 0; i < formatCtx->nb_streams; i++)
         {
-            //找到视频流的index
-            if (formatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO &&
-                videoIndex == -1)
+            if (formatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO && videoIndex == -1)
             {
                 videoIndex = i;
                 cout << "video stream index = : [" << i << "]" << endl;
             }
-            //找到音频流的index
-            if (formatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO &&
-                audioIndex == -1)
+
+            if (formatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO && audioIndex == -1)
             {
                 audioIndex = i;
                 cout << "audio stream index = : [" << i << "]" << endl;
             }
         }
+    }
 
-        if (videoEnabled)
+    /*
+   *  return
+   *          x > 0  : stream_index
+   *          -1     : no more pkt
+   */
+    int grabPacket(AVPacket *pkt)
+    {
+        if (fileGotToEnd)
         {
-            if (videoIndex == -1)
+            return -1;
+        }
+        while (true)
+        {
+            if (av_read_frame(formatCtx, pkt) >= 0)
             {
-                string errMsg = "Don't find a video stream in the file";
-                errMsg += inputUrl;
-                cout << errMsg << endl;
-                throw std::runtime_error(errMsg);
+                return pkt->stream_index;
             }
             else
             {
-                ffutils::initCodec(formatCtx, videoIndex, &vCodecCtx);
-                cout << "Init video codec success" << endl;
+                // file end;
+                fileGotToEnd = true;
+                return -1;
             }
         }
-
-        if (audioEnabled)
-        {
-            if (audioIndex == -1)
-            {
-                string errMsg = "Don't find a audio stream in the file";
-                errMsg += inputUrl;
-                cout << errMsg << endl;
-                throw std::runtime_error(errMsg);
-            }
-            else
-            {
-                ffutils::initCodec(formatCtx, audioIndex, &aCodecCtx);
-                cout << "Init audio codec success" << endl;
-            }
-        }
-
-        cout << "-----------------File Information---------------" << endl;
-        av_dump_format(formatCtx, videoIndex, inputUrl.c_str(), 0);
-        // Print detailed information about the input or output format
-        cout << "------------------------------------------------" << endl
-             << endl;
-        packet = (AVPacket *)av_malloc(sizeof(AVPacket));
     }
 
-    void close()
-    {
-        // It seems like only one xxx_free_context can be called.
-        // Which one should be called?
-        avformat_free_context(formatCtx);
-        // avcodec_free_context(&pCodecCtx);
-        // TODO implement.
-    }
+    AVFormatContext *getFormatCtx() const { return formatCtx; }
 
-    int getWidth() const
-    {
-        if (vCodecCtx != nullptr)
-        {
-            return vCodecCtx->width;
-        }
-        else
-        {
-            throw std::runtime_error("can not getWidth.");
-        }
-    }
+    bool isFileEnd() const { return fileGotToEnd; }
 
-    int getHeight() const
-    {
-        if (vCodecCtx != nullptr)
-        {
-            return vCodecCtx->height;
-        }
-        else
-        {
-            throw std::runtime_error("can not getHeight.");
-        }
-    }
-
-    int getPixelFormat() const
-    {
-        if (vCodecCtx != nullptr)
-        {
-            return static_cast<int>(vCodecCtx->pix_fmt);
-        }
-        else
-        {
-            throw std::runtime_error("can not getPixelFormat.");
-        }
-    }
-
-    double getFrameRate() const
-    {
-        if (formatCtx != nullptr)
-        {
-            AVRational frame_rate =
-                av_guess_frame_rate(formatCtx, formatCtx->streams[videoIndex], NULL);
-            double fr = frame_rate.num && frame_rate.den ? av_q2d(frame_rate) : 0.0;
-            return fr;
-        }
-        else
-        {
-            throw std::runtime_error("can not getFrameRate.");
-        }
-    }
-
-    int grabImageFrame(AVFrame *pFrame)
-    {
-        if (!videoEnabled)
-        {
-            throw std::runtime_error("video disabled.");
-        }
-        int ret = grabFrameByType(pFrame, AVMediaType::AVMEDIA_TYPE_VIDEO);
-        return ret;
-    }
-
-    int grabAudioFrame(AVFrame *pFrame)
-    {
-        if (!audioEnabled)
-        {
-            throw std::runtime_error("audio disabled");
-        }
-        int ret = grabFrameByType(pFrame, AVMediaType::AVMEDIA_TYPE_AUDIO);
-        return ret;
-    }
-
-    int getSampleRate() const
-    {
-        if (aCodecCtx != nullptr)
-        {
-            return aCodecCtx->sample_rate;
-        }
-        else
-        {
-            throw std::runtime_error("can not get audio sampleRate");
-        }
-    }
-
-    int getChannels() const
-    {
-        if (aCodecCtx != nullptr)
-        {
-            return aCodecCtx->channels;
-        }
-        else
-        {
-            throw std::runtime_error("can not get audio channels");
-        }
-    }
-
-    int getChannelLayout() const
-    {
-        if (aCodecCtx != nullptr)
-        {
-            return aCodecCtx->channel_layout;
-        }
-        else
-        {
-            throw std::runtime_error("can not get audio channelLayout");
-        }
-    }
-
-    int getSampleFormat() const
-    {
-        if (aCodecCtx != nullptr)
-        {
-            return (int)aCodecCtx->sample_fmt;
-        }
-        else
-        {
-            throw std::runtime_error("can not get audio sampleFormat");
-        }
-    }
+    int getAudioIndex() const { return audioIndex; }
+    int getVideoIndex() const { return videoIndex; }
 };
 
 struct AudioInfo
 {
     int64_t layout;        //音频通道布局
     int sampleRate;        //采样率
-    int channles;          //通道数
+    int channels;          //通道数
     AVSampleFormat format; //样本精度
 
     AudioInfo()
     {
         layout = -1;
         sampleRate = -1;
-        channles = -1;
+        channels = -1;
         format = AV_SAMPLE_FMT_S16;
     }
 
     AudioInfo(int64_t l, int sRate, int ch, AVSampleFormat fmt)
-        : layout(l), sampleRate(sRate), channles(ch), format(fmt) {}
+        : layout(l), sampleRate(sRate), channels(ch), format(fmt) {}
 };
 
 //重采样，改变音频的采样率等参数，使得音频按照我们期望的参数输出
@@ -510,8 +213,6 @@ public:
     ReSampler(const ReSampler &) = delete;
     ReSampler(ReSampler &&) noexcept = delete;
     ReSampler operator=(const ReSampler &) = delete;
-
-public:
     ~ReSampler()
     {
         cout << "~ReSampler called" << endl;
@@ -524,7 +225,6 @@ public:
     const AudioInfo in;
     const AudioInfo out;
 
-public:
     static AudioInfo getDefaultAudioInfo(int sr)
     {
         int64_t layout = AV_CH_LAYOUT_STEREO;
@@ -535,7 +235,6 @@ public:
         return ffmpegUtil::AudioInfo(layout, sampleRate, channels, format);
     }
 
-public:
     ReSampler(AudioInfo input, AudioInfo output) : in(input), out(output)
     {
         //分配SwrContext
@@ -548,7 +247,6 @@ public:
         }
     }
 
-public:
     int allocDataBuf(uint8_t **outData, int inputSample)
     { //申请数据存储空间
         int bytePerOutSample = -1;
@@ -580,7 +278,7 @@ public:
 
         int outSamplesPerChannel = av_rescale_rnd(inputSample, out.sampleRate, in.sampleRate, AV_ROUND_UP);
 
-        int outSize = outSamplesPerChannel * out.channles * bytePerOutSample;
+        int outSize = outSamplesPerChannel * out.channels * bytePerOutSample;
 
         std::cout << "GuessOutSamplesPerChannel: " << outSamplesPerChannel << std::endl;
         std::cout << "GuessOutSize: " << outSize << std::endl;
@@ -592,7 +290,6 @@ public:
         return outSize;
     }
 
-public:
     std::tuple<int, int> reSample(uint8_t *dataBuffer, int dataBufferSize, const AVFrame *aframe)
     {
 
@@ -605,7 +302,7 @@ public:
         }
 
         // Get the required buffer size for the given audio parameters.
-        int outDataSize = av_samples_get_buffer_size(NULL, out.channles, outSample, out.format, 1);
+        int outDataSize = av_samples_get_buffer_size(NULL, out.channels, outSample, out.format, 1);
 
         if (outDataSize <= 0)
         {
@@ -613,12 +310,6 @@ public:
         }
         return {outSample, outDataSize};
     }
-};
-
-struct AudioUtil
-{
-    FrameGrabber *grabber;
-    ReSampler *reSampler;
 };
 
 } // namespace ffmpegUtil
