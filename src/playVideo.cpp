@@ -22,7 +22,7 @@ void refreshPicture(int timeInterval, bool &exitRefresh, bool &faster)
         event.type = REFRESH_EVENT;
         SDL_PushEvent(&event);
         if (faster)
-        { //faster=true sleep更短的时间 加快速度
+        {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeInterval / 2));
         }
         else
