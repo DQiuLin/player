@@ -40,11 +40,10 @@ using std::stringstream;
 
 struct ffutils
 {
-    static void initCodec(AVFormatContext *formatContext, int streamIndex,
-                          AVCodecContext **avCodecContext)
+    static void initCodec(AVFormatContext *formatCtx, int streamIndex, AVCodecContext **avCodecContext)
     {
         string codecType{};
-        switch (formatContext->streams[streamIndex]->codec->codec_type)
+        switch (formatCtx->streams[streamIndex]->codec->codec_type)
         {
         case AVMEDIA_TYPE_VIDEO:
             codecType = "video_codec";
@@ -57,8 +56,7 @@ struct ffutils
         }
 
         //获取解码器信息
-        AVCodec *codec = avcodec_find_decoder(
-            formatContext->streams[streamIndex]->codecpar->codec_id);
+        AVCodec *codec = avcodec_find_decoder(formatCtx->streams[streamIndex]->codecpar->codec_id);
 
         if (codec == nullptr)
         {
@@ -72,10 +70,7 @@ struct ffutils
         (*avCodecContext) = avcodec_alloc_context3(codec);
         auto codecCtx = *avCodecContext;
 
-        // Fill the codec context based on the values from the supplied codec
-        // parameters
-        if (avcodec_parameters_to_context(
-                codecCtx, formatContext->streams[streamIndex]->codecpar) != 0)
+        if (avcodec_parameters_to_context(codecCtx, formatCtx->streams[streamIndex]->codecpar) != 0)
         {
             string errorMsg = "Could not copy codec context";
             errorMsg += codec->name;
@@ -91,8 +86,7 @@ struct ffutils
             throw std::runtime_error(errorMsg);
         }
 
-        cout << codecType << "[" << codecCtx->codec->name
-             << "] codec context initialize success" << endl;
+        cout << codecType << "[" << codecCtx->codec->name << "] codec context initialize success" << endl;
     }
 };
 
@@ -100,7 +94,7 @@ class PacketGrabber
 {
     const string inputUrl;
     AVFormatContext *formatCtx = nullptr;
-    bool fileGotToEnd = false;
+    bool isEnd = false;
 
     int videoIndex = -1;
     int audioIndex = -1;
@@ -115,7 +109,7 @@ public:
         }
         cout << "~PacketGrabber called." << endl;
     }
-    PacketGrabber(const string &uri) : inputUrl(uri)
+    PacketGrabber(const string &url) : inputUrl(url)
     {
         formatCtx = avformat_alloc_context();
 
@@ -151,14 +145,9 @@ public:
         }
     }
 
-    /*
-   *  return
-   *          x > 0  : stream_index
-   *          -1     : no more pkt
-   */
     int grabPacket(AVPacket *pkt)
     {
-        if (fileGotToEnd)
+        if (isEnd)
         {
             return -1;
         }
@@ -171,7 +160,7 @@ public:
             else
             {
                 // file end;
-                fileGotToEnd = true;
+                isEnd = true;
                 return -1;
             }
         }
@@ -179,7 +168,7 @@ public:
 
     AVFormatContext *getFormatCtx() const { return formatCtx; }
 
-    bool isFileEnd() const { return fileGotToEnd; }
+    bool isFileEnd() const { return isEnd; }
 
     int getAudioIndex() const { return audioIndex; }
     int getVideoIndex() const { return videoIndex; }

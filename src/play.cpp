@@ -59,7 +59,7 @@ void pktReader(PacketGrabber &pGrabber, AudioProcessor *aProcessor,
             else
             {
                 av_packet_free(&packet);
-                cout << "WARN: unknown streamIndex: [" << t << "]" << endl;
+                cout << "WARNING: unknown streamIndex: [" << t << "]" << endl;
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(CHECK_PERIOD));
@@ -72,8 +72,9 @@ int play(const string &inputFile)
     // create packet grabber
     PacketGrabber packetGrabber{inputFile};
     auto formatCtx = packetGrabber.getFormatCtx();
-    av_dump_format(formatCtx, 0, "", 0);
+    av_dump_format(formatCtx, 0, "", 0); //print
 
+    // create VideoProcessor
     VideoProcessor videoProcessor(formatCtx);
     videoProcessor.start();
 
@@ -95,7 +96,7 @@ int play(const string &inputFile)
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER))
     {
         //初始化失败
-        string errMsg = "Could not initialize SDL -";
+        string errMsg = "Could not initialize SDL - ";
         errMsg += SDL_GetError();
         cout << errMsg << endl;
         throw std::runtime_error(errMsg);
@@ -105,13 +106,8 @@ int play(const string &inputFile)
 
     std::thread startAudioThread(startSdlAudio, std::ref(audioDeviceID),
                                  std::ref(audioProcessor));
-    startAudioThread.join();
-
-    // std::thread videoThread{playSdlVideo, std::ref(videoProcessor), &audioProcessor};
 
     playSdlVideo(videoProcessor, &audioProcessor);
-    cout << "videoThread join." << endl;
-    // videoThread.join();
 
     SDL_PauseAudioDevice(audioDeviceID, 1);
     SDL_CloseAudio();
@@ -125,6 +121,7 @@ int play(const string &inputFile)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     readerThread.join();
+    startAudioThread.join();
     cout << "Pause and Close audio" << endl;
 
     return 0;

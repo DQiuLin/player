@@ -17,8 +17,6 @@ void sdlAudioCallback(void *userdata, Uint8 *stream, int len)
 
 void startSdlAudio(SDL_AudioDeviceID &audioDeviceID, AudioProcessor &aProcessor)
 {
-    //--------------------- GET SDL audio READY -------------------
-
     // audio specs containers
     SDL_AudioSpec wanted_specs; // desired output format
     SDL_AudioSpec specs;        // actual output format
@@ -26,7 +24,6 @@ void startSdlAudio(SDL_AudioDeviceID &audioDeviceID, AudioProcessor &aProcessor)
     int samples = -1;
     while (true)
     {
-        cout << "getting audio samples." << endl;
         samples = aProcessor.getSamples();
         if (samples <= 0)
         {
@@ -74,8 +71,7 @@ void startSdlAudio(SDL_AudioDeviceID &audioDeviceID, AudioProcessor &aProcessor)
     cout << "specs.silence:" << (int)specs.silence << endl;
     cout << "specs.samples:" << (int)specs.samples << endl;
 
-    cout << "------------------------------------------------" << endl
-         << endl;
+    cout << "------------------------------------------------" << endl;
 
     SDL_PauseAudioDevice(audioDeviceID, 0);
     cout << "[THREAD] audio start thread finish." << endl;
