@@ -11,19 +11,18 @@ using std::endl;
 
 // Refresh Event
 #define REFRESH_EVENT (SDL_USEREVENT + 1)
-#define BREAK_EVENT (SDL_USEREVENT + 3)
-#define VIDEO_FINISH (SDL_USEREVENT + 4)
+#define BREAK_EVENT (SDL_USEREVENT + 2)
 
 void refreshPicture(int timeInterval, bool &exitRefresh, bool &faster)
 {
-    cout << "picRefresher timeInterval[" << timeInterval << "]" << endl;
+    cout << "picRefresher timeInterval [" << timeInterval << "]" << endl;
     while (!exitRefresh)
     {
         SDL_Event event;
         event.type = REFRESH_EVENT;
         SDL_PushEvent(&event);
         if (faster)
-        {
+        { //faster=true sleep更短的时间 加快速度
             std::this_thread::sleep_for(std::chrono::milliseconds(timeInterval / 2));
         }
         else
@@ -36,12 +35,10 @@ void refreshPicture(int timeInterval, bool &exitRefresh, bool &faster)
 
 void playSdlVideo(VideoProcessor &vProcessor, AudioProcessor *audio = nullptr)
 {
-    //--------------------- GET SDL window READY -------------------
-
     auto width = vProcessor.getWidth();
     auto height = vProcessor.getHeight();
 
-    //创建窗口SDL_Window
+    // create SDL_Window
     SDL_Window *screen;
     // SDL 2.0 Support for multiple windows
     screen = SDL_CreateWindow(":-D Player", SDL_WINDOWPOS_UNDEFINED,
@@ -94,17 +91,14 @@ void playSdlVideo(VideoProcessor &vProcessor, AudioProcessor *audio = nullptr)
                 auto aTs = audio->getPts();
                 if (vTs > aTs && vTs - aTs > 30)
                 {
-                    cout << "VIDEO FASTER ================= vTs - aTs [" << (vTs - aTs)
-                         << "]ms, SKIP A EVENT" << endl;
-                    // skip a REFRESH_EVENT
+                    // cout << "VIDEO FASTER ======== vTs - aTs [" << (vTs - aTs) << "]ms, SKIP A EVENT" << endl;
                     faster = false;
                     slowCount++;
-                    continue;
+                    continue; // skip a REFRESH_EVENT
                 }
                 else if (vTs < aTs && aTs - vTs > 30)
                 {
-                    cout << "VIDEO SLOWER ================= aTs - vTs =[" << (aTs - vTs) << "]ms, Faster"
-                         << endl;
+                    // cout << "VIDEO SLOWER ======== aTs - vTs =[" << (aTs - vTs) << "]ms, Faster" << endl;
                     faster = true;
                     fastCount++;
                 }
@@ -118,37 +112,28 @@ void playSdlVideo(VideoProcessor &vProcessor, AudioProcessor *audio = nullptr)
 
             if (frame != nullptr)
             {
-                SDL_UpdateYUVTexture(sdlTexture,
-                                     NULL,
-                                     //Y
-                                     frame->data[0],
-                                     frame->linesize[0],
-                                     //U
-                                     frame->data[1],
-                                     frame->linesize[1],
-                                     //V
-                                     frame->data[2],
-                                     frame->linesize[2]);            //设置纹理的数据
-                SDL_RenderClear(sdlRenderer);                        //渲染器clear
-                SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, NULL); //将纹理的数据拷贝给渲染器
-                SDL_RenderPresent(sdlRenderer);                      //显示
+                SDL_UpdateYUVTexture(sdlTexture, NULL, frame->data[0],
+                                     frame->linesize[0], frame->data[1], frame->linesize[1],
+                                     frame->data[2], frame->linesize[2]); //设置纹理的数据
+                SDL_RenderClear(sdlRenderer);                             //渲染器clear
+                SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, NULL);      //将纹理的数据拷贝给渲染器
+                SDL_RenderPresent(sdlRenderer);                           //显示
 
                 if (!vProcessor.refreshFrame())
                 {
-                    cout << "WARN: vProcessor.refreshFrame false" << endl;
+                    cout << "WARNING: vProcessor.refreshFrame false" << endl;
                 }
             }
             else
             {
                 failCount++;
-                cout << "WARN: getFrame fail. failCount = " << failCount << endl;
+                cout << "WARNING: getFrame fail. failCount = " << failCount << endl;
             }
         }
-        else if (event.type == SDL_QUIT)
+        else if (event.type == SDL_QUIT) // close window.
         {
             cout << "SDL screen got a SDL_QUIT." << endl;
             exitRefresh = true;
-            // close window.
             break;
         }
         else if (event.type == BREAK_EVENT)
